@@ -13,11 +13,13 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <queue>
-
+#include <map>
 #include "thread_base.h"
 #define SERVER_IP "192.168.1.235"
 #define SERVER_PORT 55555
 #define MAX_EPOLL_EVENTS  10000
+#define PENDING_TIMEOUT 60
+
 
 using namespace std;
 
@@ -25,6 +27,7 @@ class io_mutex:public thread_base
 {
 public:
 	queue<int > m_queue;
+	map<int , time_t> m_pendingfd;
 public:
 	//io_mutex *getInstance()
 	io_mutex(){}
@@ -35,7 +38,7 @@ public:
 public:
 	int socket_init(const char *ip, const int port);
 	int set_nonblock(int fd); 
-
+	void reset_oneshot(int epollfd, int fd);
 
 };
 

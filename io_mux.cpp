@@ -20,6 +20,9 @@ io_mutex::~io_mutex()
 #endif
 /*
 */
+
+int epollfd;
+struct epoll_event ep_event;
 int io_mutex::socket_init(const char *ip, const int port)
 {
 	struct sockaddr_in server_addr;
@@ -53,12 +56,62 @@ int io_mutex::set_nonblock(int fd)
 	fcntl(fd, F_SETFD, opt | O_NONBLOCK);
 	return opt;
 }
+
+#if 0
+void io_mutex::reset_oneshot(int epollfd, int fd)
+{
+	epoll_event event;
+	event.data.fd = fd;
+	event.events = EPOLLIN | EPOLLET | EPOLLONSHOT;
+	epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &event);
+
+
+
+}
+#endif
+void *check_pend_timeout(void *arg)
+{
+	pthread_detach(pthread_self());
+	io_mutex *io_ctr = (io_mutex *)arg;
+	while (1){
+		sleep(1);
+		time_t tNow;
+		time(&tNow);
+		map<int, time_t>::iterator pos;
+		io_ctr->lock(io_ctr->m_pending);
+		for(pos = io_ctr->m_pendingfd.begin(); pos != io_ctr->m_pendingfd.end();)
+		{
+			time_t fd_timeBegin = pos->second;
+			if (tNow - fd_timeBegin > PENDING_TIMEOUT){
+				int fd = pos->first;
+				//struct epoll_event ev;
+				//ev.data.fd = fd;
+				if (-1 == epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, &ep_event)){
+					printf("error EPOLL_CTL_DEL \n");
+				}
+				printf("success EPOLL_CTL_DEL \n");
+				io_ctr->m_pendingfd.erase(pos++);
+				close(fd);
+			}
+			else{
+				++pos;
+			}
+		}
+
+
+		io_ctr->unlock(io_ctr->m_pending);
+
+
+	}
+
+
+}
 void *worker(void *arg)
 {
 	pthread_detach(pthread_self());
 	io_mutex *io_ctr = (io_mutex *)arg;
 	while(true){
-		io_ctr->lock();
+		io_ctr->lock(io_ctr->m_mutex);
 		while(io_ctr->m_queue.empty()){
 			pthread_cond_wait(&io_ctr->m_cond, &io_ctr->m_mutex);
 		}
@@ -66,37 +119,54 @@ void *worker(void *arg)
 		io_ctr->m_queue.pop();
 		int nRet = 0;
 		char buffer[1024];
-		//while (1){
+		while (1){
+			/*确保较长的数据一次性读完，在ET模式下可以使用while循环读取*/
 			memset(buffer, 0, 1024);
 			nRet = recv(fd, buffer, sizeof(buffer), 0);
 			if (nRet == -1){
-				if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR){
+				if (errno == EAGAIN || errno == EWOULDBLOCK ){
 					/*
-						EAGAIN 和 EWOULDBLOCK：非阻塞状态下，系统提示再试一次，非错误
-						EINTR：系统中断
+					*EAGAIN 和 EWOULDBLOCK：非阻塞状态下，系统提示再试一次，非错误
+					*在非阻塞ET模式下，即代表数据读完，但是通常情况下还需要比对私有
+					*头标记的数据长度，如果数据长度不一致，需要再次读
 					*/
+
+					ep_event.data.fd = fd;
+					ep_event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;//读完数据重新修改属性
+					epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ep_event);
+
 					break;
+				} else if (errno == EINTR){
+				/*
+				 *	
+				 *	EINTR：系统中断
+				 */
+					continue;
 
+				} else {
+					printf("recv error\n");
+					close(fd);//返回了异常错误码，直接关闭
+					break;
 				}
-				close(fd);//返回了异常错误码，直接关闭
-				break;
-			} else if (nRet == 0){
 
+
+			} else if (nRet == 0){
+				printf("client close\n");
 				close(fd);	//客户端关闭
 				break;
 			} else {
-				printf(" get data: %s\n ", buffer);
+				printf(" get data: %d\n ", nRet);
 
 			}
 
-		//}
-		io_ctr->unlock();
-
+		}
+		io_ctr->unlock(io_ctr->m_mutex);
 
 	}
 
 
 }
+
 
 int main(int argc, char const *argv[])
 {
@@ -105,36 +175,35 @@ int main(int argc, char const *argv[])
 	 *
 	 *
 	 */
-	int sockfd, epollfd, nfds;
+	int sockfd, nfds;
 	io_mutex *io = new io_mutex;
 
 	sockfd = io->socket_init(SERVER_IP, SERVER_PORT);
 
 	struct epoll_event events[MAX_EPOLL_EVENTS];
-	struct epoll_event ep_event;
+
 	epollfd = epoll_create1(0);
 	ep_event.data.fd = sockfd;
 	ep_event.events = EPOLLIN;
 	io->set_nonblock(sockfd);
-	/*
-	 *	epoll默认水平触发，listen的fd不要设置边缘触发
-	 */
+
 	ep_event.events = EPOLLIN | EPOLLET;
 	epoll_ctl(epollfd, EPOLL_CTL_ADD, sockfd, &ep_event);
 
 	/*
+	 *
 	 *	开启工作线程，优化如何进行多线程高效率的同步？
 	 */
 	pthread_t pth[5];
 	for ( int i = 0; i < 5; i++)
 		pthread_create(&pth[i], NULL, worker, io);
 	/*
-	 * 创建一个线程来处理新fd连接超时时间，一定程度上防止ddos攻击，
-	 * 提高程序处理效率
-	 * pthread_t pth;
-	 * int ret = pthread_create(&pth, NULL, check_timeout, io);
-	 *
+	 * 
+	 *创建一个线程来处理新fd连接超时时间
 	 */
+	pthread_t pth_pend;
+	int ret = pthread_create(&pth_pend, NULL, check_pend_timeout, io);
+
 
 
 	/*
@@ -163,11 +232,22 @@ int main(int argc, char const *argv[])
 				}
 				io->set_nonblock(connfd);
 				ep_event.data.fd = connfd;
-				ep_event.events = EPOLLIN | EPOLLET;
+				/*
+				 *	在ET模式下，一个socket上的某个事件还是可能被触发多次，多线程同事操作同一socket
+				 *	
+				 *	确保socket连接在任一时刻都只被一个线程处理,可以使用EPOLLONESHOT
+				 *
+				 *
+				 */
+				ep_event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
 				if (epoll_ctl(epollfd, EPOLL_CTL_ADD, connfd, &ep_event) < 0){
 					close(connfd);
 					continue;
 				}
+				io->lock(io->m_pending);
+				io->m_pendingfd.insert(pair<int, time_t>(connfd, time(NULL)));
+				io->unlock(io->m_pending);
+
 			} else {
 				int tmp_sockfd;
 				tmp_sockfd = events[i].data.fd;
@@ -175,11 +255,11 @@ int main(int argc, char const *argv[])
 					continue;
 				}
 
-				io->lock();
+				io->lock(io->m_mutex);
 				io->m_queue.push(tmp_sockfd);
 				printf("m_queue.size() = %d\n", io->m_queue.size());
 				pthread_cond_broadcast(&io->m_cond);
-				io->unlock();
+				io->unlock(io->m_mutex);
 
 			}
 		}
