@@ -18,7 +18,7 @@
 #define SERVER_IP "192.168.1.235"
 #define SERVER_PORT 55555
 #define MAX_EPOLL_EVENTS  10000
-#define PENDING_TIMEOUT 60
+#define PENDING_TIMEOUT 120
 
 
 using namespace std;
