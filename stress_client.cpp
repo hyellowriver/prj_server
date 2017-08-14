@@ -83,7 +83,7 @@ void start_conn( int epoll_fd, int num, const char* ip, int port )
 
     for ( int i = 0; i < num; ++i )
     {
-        usleep( 100 * 1000 );
+        usleep( 10 * 1000 );
         int sockfd = socket( PF_INET, SOCK_STREAM, 0 );
         printf( "create 1 sock\n" );
         if( sockfd < 0 )

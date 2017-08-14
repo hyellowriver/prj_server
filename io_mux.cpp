@@ -175,6 +175,8 @@ int main(int argc, char const *argv[])
 	 *
 	 *
 	 */
+	double a = 1/3.0;
+	printf("%f\n", a);
 	int sockfd, nfds;
 	io_mutex *io = new io_mutex;
 
