@@ -23,4 +23,4 @@ server : $(OBJ)
 stress_client: $(obj_cli)
 	$(CC) $(CFLAGS) -o $@ $^ 
 clean:
-	rm -rf *.o server
+	rm -rf *.o server stress_client

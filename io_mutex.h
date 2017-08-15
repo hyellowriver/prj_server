@@ -15,10 +15,11 @@
 #include <queue>
 #include <map>
 #include "thread_base.h"
+#include "client_manage.h"
 #define SERVER_IP "192.168.1.235"
 #define SERVER_PORT 55555
 #define MAX_EPOLL_EVENTS  10000
-#define PENDING_TIMEOUT 120
+#define PENDING_TIMEOUT 180
 
 
 using namespace std;
@@ -28,6 +29,7 @@ class io_mutex:public thread_base
 public:
 	queue<int > m_queue;
 	map<int , time_t> m_pendingfd;
+	map<int , client_manage *> m_manage;
 public:
 	//io_mutex *getInstance()
 	io_mutex(){}

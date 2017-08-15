@@ -106,65 +106,86 @@ void *check_pend_timeout(void *arg)
 
 
 }
+size_t recv_data(int fd, char *buffer, size_t n)
+{
+	int nRet = 0;
+	int pos = 0;
+	memset(buffer, 0, n);
+	while (1){
+		/*确保较长的数据一次性读完，在ET模式下可以使用while循环读取*/
+		nRet = recv(fd, buffer + pos, n - pos, 0);
+		if (nRet == -1){
+			if (errno == EAGAIN || errno == EWOULDBLOCK ){
+				/*
+				*EAGAIN 和 EWOULDBLOCK：非阻塞状态下，系统提示再试一次，非错误
+				*在非阻塞ET模式下，即代表数据读完，但是通常情况下还需要比对私有
+				*头标记的数据长度，如果数据长度不一致，需要再次读
+				*/
+				printf("get all data len = %d\n", pos);
+				return pos;
+			} else if (errno == EINTR){
+			/*
+			 *	
+			 *	EINTR：系统中断
+			 */
+				continue;
+
+			} else {
+				printf("recv error\n");
+				close(fd);//返回了异常错误码，直接关闭
+				break;
+			}
+
+
+		} else if (nRet == 0){
+			printf("client close\n");
+			close(fd);	//客户端关闭
+			break;
+		} else {
+			pos += nRet;
+			printf(" get data: %s\n ", buffer);
+			//return pos;
+			//break;
+		}
+	}
+
+}
 void *worker(void *arg)
 {
 	pthread_detach(pthread_self());
 	io_mutex *io_ctr = (io_mutex *)arg;
+	int fd;
 	while(true){
 		io_ctr->lock(io_ctr->m_mutex);
 		while(io_ctr->m_queue.empty()){
 			pthread_cond_wait(&io_ctr->m_cond, &io_ctr->m_mutex);
 		}
-		int fd = io_ctr->m_queue.front();
+		fd = io_ctr->m_queue.front();
 		io_ctr->m_queue.pop();
-		int nRet = 0;
-		char buffer[1024];
-		while (1){
-			/*确保较长的数据一次性读完，在ET模式下可以使用while循环读取*/
-			memset(buffer, 0, 1024);
-			nRet = recv(fd, buffer, sizeof(buffer), 0);
-			if (nRet == -1){
-				if (errno == EAGAIN || errno == EWOULDBLOCK ){
-					/*
-					*EAGAIN 和 EWOULDBLOCK：非阻塞状态下，系统提示再试一次，非错误
-					*在非阻塞ET模式下，即代表数据读完，但是通常情况下还需要比对私有
-					*头标记的数据长度，如果数据长度不一致，需要再次读
-					*/
-
-					ep_event.data.fd = fd;
-					ep_event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;//读完数据重新修改属性
-					epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ep_event);
-
-					break;
-				} else if (errno == EINTR){
-				/*
-				 *	
-				 *	EINTR：系统中断
-				 */
-					continue;
-
-				} else {
-					printf("recv error\n");
-					close(fd);//返回了异常错误码，直接关闭
-					break;
-				}
-
-
-			} else if (nRet == 0){
-				printf("client close\n");
-				close(fd);	//客户端关闭
-				break;
-			} else {
-				printf(" get data: %d\n ", nRet);
-
-			}
-
-		}
 		io_ctr->unlock(io_ctr->m_mutex);
+		char buffer[1024];
+		memset(buffer, 0, 1024);
+		size_t res = recv_data(fd, buffer, 1024);
+		/*
+		*工作线程，接收完整的数据，业务层解析私有协议
+		*对于非法的连接或者协议不正确，关掉socket
+		*
+		*/
 
+
+		/*
+		*目前私有协议头并没有规划好
+		*在标识客户端连接和服务器处理客户端的对象
+		*用fd来映射
+		*/
+		//client_manage *cli_m = new client_manage;
+		//io_ctr->m_manage.insert(pair<int, client_manage *>(fd, cli_m));
+
+
+		ep_event.data.fd = fd;
+		ep_event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;//读完数据重新修改属性
+		epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &ep_event);
 	}
-
-
 }
 
 
@@ -247,7 +268,7 @@ int main(int argc, char const *argv[])
 					continue;
 				}
 				io->lock(io->m_pending);
-				io->m_pendingfd.insert(pair<int, time_t>(connfd, time(NULL)));
+				io->m_pendingfd.insert(pair<int, time_t>(connfd, time(NULL)));//超时检查连接映射表
 				io->unlock(io->m_pending);
 
 			} else {
