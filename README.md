@@ -1,9 +1,11 @@
 开发语言：C++
 
 背景：构建高并发服务器程序，实现10万次客户端并发连接 
+
 架构： Epoll的ET模式+多线程+mysql数据库
 
 编译：make clean;make;make stress_client
+
 	server:服务器可执行文件
 
 	stress_client:压测的客户端执行文件
