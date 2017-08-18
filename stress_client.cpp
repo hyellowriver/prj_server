@@ -83,7 +83,7 @@ void start_conn( int epoll_fd, int num, const char* ip, int port )
 
     for ( int i = 0; i < num; ++i )
     {
-        usleep( 1000 );
+        usleep( 10 *1000 );
         int sockfd = socket( PF_INET, SOCK_STREAM, 0 );
         printf( "create 1 sock\n" );
         if( sockfd < 0 )
@@ -108,12 +108,13 @@ void close_conn( int epoll_fd, int sockfd )
 int main( int argc, char* argv[] )
 {
     int epoll_fd = epoll_create( 100 );
-    start_conn( epoll_fd, 10, "192.168.1.235", 55555 );
+    start_conn( epoll_fd, 100000, "192.168.1.235", 55555 );
     epoll_event events[ 10000 ];
     char buffer[ 2048 ];
     while ( 1 )
     {
         int fds = epoll_wait( epoll_fd, events, 10000, 2000 );
+        printf("  fds = %d\n", fds);
         for ( int i = 0; i < fds; i++ )
         {   
             int sockfd = events[i].data.fd;

@@ -144,11 +144,11 @@ size_t recv_data(int fd, char *buffer, size_t n)
 		} else {
 			pos += nRet;
 			printf(" get data: %s\n ", buffer);
-			//return pos;
-			//break;
+
+			break;
 		}
 	}
-
+			return pos;
 }
 void *worker(void *arg)
 {
@@ -162,24 +162,25 @@ void *worker(void *arg)
 		}
 		fd = io_ctr->m_queue.front();
 		io_ctr->m_queue.pop();
+		printf("	   queue size = %d\n", io_ctr->m_queue.size());
 		io_ctr->unlock(io_ctr->m_mutex);
-		char buffer[1024];
-		memset(buffer, 0, 1024);
-		size_t res = recv_data(fd, buffer, 1024);
+		char buffer[1024] = {0};
+
 		/*
 		*工作线程，接收完整的数据，业务层解析私有协议
 		*对于非法的连接或者协议不正确，关掉socket
 		*
 		*/
-
-
+		size_t res = recv_data(fd, buffer, 1024);
 		/*
 		*目前私有协议头并没有规划好
 		*在标识客户端连接和服务器处理客户端的对象
 		*用fd来映射
+		*
 		*/
-		//client_manage *cli_m = new client_manage;
-		//io_ctr->m_manage.insert(pair<int, client_manage *>(fd, cli_m));
+		client_manage *cli_m = new client_manage;
+		io_ctr->m_manage.insert(pair<int, client_manage *>(fd, cli_m));
+		//cli_m->deal_request(fd, buffer, res);
 
 
 		ep_event.data.fd = fd;
@@ -196,6 +197,7 @@ int main(int argc, char const *argv[])
 	 *
 	 *
 	 */
+
 	double a = 1/3.0;
 	printf("%f\n", a);
 	int sockfd, nfds;
@@ -217,8 +219,8 @@ int main(int argc, char const *argv[])
 	 *
 	 *	开启工作线程，优化如何进行多线程高效率的同步？
 	 */
-	pthread_t pth[5];
-	for ( int i = 0; i < 5; i++)
+	pthread_t pth[10];
+	for ( int i = 0; i < 10; i++)
 		pthread_create(&pth[i], NULL, worker, io);
 	/*
 	 * 
@@ -241,7 +243,6 @@ int main(int argc, char const *argv[])
 			printf("epoll_wait error = %s\n", strerror(errno));
 			break;
 		}
-		printf("---------nfds = %d\n", nfds);
 		for (int i = 0; i < nfds; ++i){
 			if (events[i].data.fd == sockfd) {
 				struct sockaddr_in client_addr;
@@ -277,6 +278,18 @@ int main(int argc, char const *argv[])
 				if (tmp_sockfd < 0){
 					continue;
 				}
+
+				/*
+				*更新最后一次对应客户端访问时间
+				*/
+				time_t tNow;
+				time(&tNow);
+				io->lock(io->m_pending);
+				map<int, time_t>::iterator pos = io->m_pendingfd.find(tmp_sockfd);
+				if (pos != io->m_pendingfd.end()) {
+					pos->second = tNow;
+				}
+				io->unlock(io->m_pending);
 
 				io->lock(io->m_mutex);
 				io->m_queue.push(tmp_sockfd);
