@@ -1,5 +1,11 @@
 #include "io_mutex.h"
+#include "sys_log.h"
 #include <pthread.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <time.h>
+#include <sys/time.h>
+#include <sys/timeb.h>
 #if 0
 io_mutex *io_mutex::m_instance = NULL;
 
@@ -21,10 +27,12 @@ io_mutex::~io_mutex()
 /*
 */
 
+
 int epollfd;
 struct epoll_event ep_event;
 int io_mutex::socket_init(const char *ip, const int port)
 {
+
 	struct sockaddr_in server_addr;
 	int sockfd, reuse = 1;
 
@@ -33,9 +41,14 @@ int io_mutex::socket_init(const char *ip, const int port)
 	server_addr.sin_port = htons(port);
 
 	if (inet_pton(PF_INET, ip, &server_addr.sin_addr) == -1)
-		printf("inet_pton() error \n");
+		sys_log::getInstance()->write_log(2, "inet_pton %s,%d",__FILE__,__LINE__);
+
+	//DPrint("info(%s) %d", "sdf", 123);
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
 		printf("socket() error \n");
+
+		sys_log::getInstance()->write_log(2, "socket() error %s,%d",__FILE__,__LINE__);
+
 	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1)
 		printf("setsockopt() error \n");
 	if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
@@ -197,6 +210,9 @@ int main(int argc, char const *argv[])
 	 *
 	 *
 	 */
+
+	time_t ltime;
+	//write_log(2, "The Daemon started at: %s\n", ctime( &ltime ) );
 
 	double a = 1/3.0;
 	printf("%f\n", a);
